@@ -12,159 +12,40 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Скачать код
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Подготовить файлы (распаковать zip, разложить по папкам)
+      - name: Распаковать архив с игрой
         run: |
-          python3 - <<'PYEOF'
-          import os, re, shutil, sys, zipfile, tempfile
+          Z=$(ls *.zip | head -n 1)
+          unzip -q -o "$Z" -d /tmp/proj
+          cp -r /tmp/proj/*/. .
+          ls -la
 
-          ROOT = os.getcwd()
-          SKIP = {'.git', '.github', 'node_modules'}
-
-          def all_files(base=ROOT):
-              out = []
-              for d, dirs, files in os.walk(base):
-                  dirs[:] = [x for x in dirs if x not in SKIP]
-                  for f in files:
-                      out.append(os.path.relpath(os.path.join(d, f), base))
-              return sorted(out)
-
-          print('=== Файлы в репозитории ===')
-          for f in all_files():
-              print('  ', f)
-
-          # 1) Если загружен zip-архив — распаковать
-          zips = [f for f in all_files() if f.lower().endswith('.zip') or re.search(r'\.zip(\s*\(\d+\))?$', f.lower())]
-          for z in zips:
-              print(f'\n=== Распаковываю архив {z} ===')
-              tmp = tempfile.mkdtemp()
-              with zipfile.ZipFile(z) as zf:
-                  zf.extractall(tmp)
-              # ищем папку проекта (где лежит settings.gradle)
-              proj = None
-              for d, dirs, files in os.walk(tmp):
-                  if 'settings.gradle' in files:
-                      proj = d; break
-              if proj is None:
-                  proj = tmp
-              for name in os.listdir(proj):
-                  src = os.path.join(proj, name); dst = os.path.join(ROOT, name)
-                  if os.path.isdir(src):
-                      shutil.copytree(src, dst, dirs_exist_ok=True)
-                  else:
-                      shutil.copy2(src, dst)
-              os.remove(z)
-
-          # 2) Если файлы загружены без папок — разложить, даже если имена немного изменились
-          TARGETS = {
-              'settings.gradle': 'settings.gradle',
-              'build.gradle': 'build.gradle',
-              'gradle.properties': 'gradle.properties',
-              'app.build.gradle': 'app/build.gradle',
-              'debug.keystore': 'app/debug.keystore',
-              'androidmanifest.xml': 'app/src/main/AndroidManifest.xml',
-              'mainactivity.java': 'app/src/main/java/com/spermbank/office/MainActivity.java',
-              'strings.xml': 'app/src/main/res/values/strings.xml',
-              'styles.xml': 'app/src/main/res/values/styles.xml',
-              'ic_launcher.png': 'app/src/main/res/mipmap-xxxhdpi/ic_launcher.png',
-              'index.html': 'app/src/main/assets/www/index.html',
-              'style.css': 'app/src/main/assets/www/style.css',
-              'game.js': 'app/src/main/assets/www/game.js',
-              'icon.png': 'app/src/main/assets/www/icon.png',
-          }
-          OPTIONAL = {'icon.png'}
-
-          def norm(name):
-              n = name.lower().strip()
-              for _ in range(3):
-                  n = re.sub(r'\s*\(\d+\)', '', n)          # "game (1).js" -> "game.js"
-                  n = re.sub(r'\.(txt|bin|dat|file)$', '', n)  # "game.js.txt" -> "game.js"
-                  n = re.sub(r'-\d+(?=\.)', '', n)            # "game-1.js" -> "game.js"
-              n = n.replace(' ', '')
-              if n == 'index.htm': n = 'index.html'
-              return n
-
-          if not os.path.isfile('app/src/main/AndroidManifest.xml') or not os.path.isfile('app/src/main/assets/www/game.js'):
-              print('\n=== Раскладываю файлы по папкам ===')
-              for f in all_files():
-                  if f.startswith('app' + os.sep) and os.path.exists(f) and f.replace(os.sep, '/') in TARGETS.values():
-                      continue  # уже на месте
-                  if f.startswith('src' + os.sep):
-                      continue  # исходники игры не трогаем
-                  key = norm(os.path.basename(f))
-                  if key in TARGETS:
-                      dst = TARGETS[key]
-                      if os.path.abspath(f) == os.path.abspath(dst):
-                          continue
-                      if os.path.exists(dst) and key in ('settings.gradle', 'build.gradle', 'gradle.properties'):
-                          if os.path.dirname(f) == '':
-                              continue
-                      os.makedirs(os.path.dirname(dst) or '.', exist_ok=True)
-                      shutil.move(f, dst)
-                      print(f'   {f}  ->  {dst}')
-
-          # 3) Проверка, что всё на месте
-          missing = [k for k, v in TARGETS.items() if k not in OPTIONAL and not os.path.isfile(v)]
-          if missing:
-              print('\n❌ НЕ ХВАТАЕТ ФАЙЛОВ:')
-              for k in missing:
-                  print('   -', k)
-              print('Загрузи эти файлы в репозиторий (Add file -> Upload files) или загрузи целиком архив spermbank-office.zip')
-              sys.exit(1)
-          print('\n✅ Все файлы на месте:')
-          for f in all_files('app'):
-              print('   app/' + f)
-          PYEOF
-
-      - name: Установить Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Собрать игру из исходников (если они есть)
+      - name: Собрать игру (JavaScript)
         run: |
-          if [ -f src/main.js ] && [ -f package.json ]; then
-            if [ -f package-lock.json ]; then npm ci; else npm install; fi
-            npm run build
-          else
-            echo "Исходников нет — используется готовый game.js"
-          fi
+          npm ci
+          npm run build
 
-      - name: Установить Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Установить Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Установить Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
       - name: Собрать APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          curl -sSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          /tmp/gradle-8.9/bin/gradle assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk SPERMbank-Office.apk
 
-      - name: Переименовать APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk SPERMbank-Office.apk
-
-      - name: Сохранить APK в Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: SPERMbank-Office-APK
           path: SPERMbank-Office.apk
 
       - name: Выложить APK в Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: СПЕРМбанк Офис — сборка ${{ github.run_number }}
-          body: |
-            Автоматическая сборка №${{ github.run_number }}.
-            Скачай файл SPERMbank-Office.apk ниже и установи на Android.
-          files: SPERMbank-Office.apk
-          make_latest: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "build-${{ github.run_number }}" SPERMbank-Office.apk --title "СПЕРМбанк Офис — сборка ${{ github.run_number }}" --notes "Скачай SPERMbank-Office.apk и установи на Android." --latest
